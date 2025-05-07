@@ -25,47 +25,40 @@ def login_to_forex():
         print("✅ Logged in to FOREX.com API")
     else:
         print(f"❌ Login failed: {response.status_code}")
+        print(response.text)
+
+# --- PLACE ORDER FUNCTION ---
 def place_order(order_type):
     account_id = os.getenv("FOREX_ACCOUNT_ID")
     url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
+
     payload = {
-        "MarketId": 401484347,  # EUR/USD market ID (default; confirm if needed)
+        "MarketId": 401484347,
         "Direction": "buy" if order_type == "BUY" else "sell",
         "Quantity": 1,
         "OrderType": "market",
         "TradingAccountId": int(account_id),
-        "AuditId": "webhook"
+        "AuditId": "webhook",
+        "MarketName": "EUR/USD"
     }
 
     response = session.post(url, json=payload, headers=headers)
+
+    if response.status_code == 401:
+        print("🔁 Session expired. Re-logging in...")
+        login_to_forex()
+        response = session.post(url, json=payload, headers=headers)
 
     if response.status_code == 200:
         print(f"✅ {order_type} order placed successfully")
     else:
         print(f"❌ Failed to place {order_type} order: {response.status_code}")
         print(response.text)
-        print(response.text)
-def place_order(direction):
-    url = "https://ciapi.cityindex.com/TradingAPI/order/newtrade"
-    payload = {
-        "MarketId": 401484347,  # EUR/USD — adjust if needed
-        "Direction": "buy" if direction == "BUY" else "sell",
-        "Quantity": 1,
-        "OrderType": "Market",
-        "TradingAccountId": int(os.getenv("FOREX_ACCOUNT_ID")),
-        "MarketName": "EUR/USD"
-    }
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-    response = session.post(url, json=payload, headers=headers)
-    print(f"📤 Order response: {response.status_code}")
-    print(response.text)
 
 # --- WEBHOOK ENDPOINT ---
 @app.route('/webhook', methods=['POST'])
@@ -78,12 +71,8 @@ def webhook():
 
     if "BUY EURUSD" in message.upper():
         place_order("BUY")
-
-        # TODO: Send real trade request here using `session`
     elif "SELL EURUSD" in message.upper():
-       place_order("SELL")
-
-        # TODO: Send real trade request here using `session`
+        place_order("SELL")
     else:
         print("⚠️ Unrecognized message format")
 
