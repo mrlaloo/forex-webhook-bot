@@ -3,7 +3,7 @@ import datetime
 
 app = Flask(__name__)
 
-@app.route('/', methods=['POST'])  # Listen at root
+@app.route('/', methods=['GET', 'POST'])  # Accept both GET and POST
 def webhook():
     data = request.get_json()
     message = data.get('message', '')
