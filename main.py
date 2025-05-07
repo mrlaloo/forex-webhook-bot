@@ -3,10 +3,11 @@ import datetime
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET', 'POST'])  # Accept both GET and POST
+@app.route('/', methods=['GET', 'POST'])  # Root route
+@app.route('/webhook', methods=['POST'])  # Webhook route
 def webhook():
-    data = request.get_json()
-    message = data.get('message', '')
+    data = request.get_json(silent=True)
+    message = data.get('message', '') if data else ''
 
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{now}] 🔔 TradingView Alert Received: {message}")
