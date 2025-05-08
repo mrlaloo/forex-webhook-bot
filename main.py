@@ -12,7 +12,8 @@ def login_to_forex():
     payload = {
         "UserName": os.getenv("FOREX_EMAIL"),
         "Password": os.getenv("FOREX_PASSWORD"),
-        "AppKey": "CIAPI.test"
+        "AppKey": "3c5ddbf9ff634a0b86f07a5c132b048b"
+
     }
     headers = {
         "Content-Type": "application/json",
