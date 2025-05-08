@@ -1,90 +1,76 @@
 import os
+import json
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request
 
 app = Flask(__name__)
 
-# Global session and account_id
-session = requests.Session()
-account_id = None
+# Load credentials from environment
+FOREX_EMAIL = os.environ.get("FOREX_EMAIL")
+FOREX_PASSWORD = os.environ.get("FOREX_PASSWORD")
+FOREX_ACCOUNT_ID = os.environ.get("FOREX_ACCOUNT_ID")
 
-def login_to_forex():
-    global session, account_id
-    print("🔐 Logging in to FOREX.com API")
-    login_url = "https://ciapi.cityindex.com/tradingapi/session"
+# Constants
+LOGIN_URL = "https://api-demo.forex.com/auth/token"
+ORDER_URL = f"https://api-demo.forex.com/accounts/{FOREX_ACCOUNT_ID}/orders"
+TOKEN = None
 
+def login():
+    global TOKEN
     payload = {
-        "UserName": os.getenv("FOREX_EMAIL"),
-        "Password": os.getenv("FOREX_PASSWORD"),
-        "AppKey": "forex_webhook_bot"
+        "identifier": FOREX_EMAIL,
+        "password": FOREX_PASSWORD
     }
-
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-
-    response = session.post(login_url, json=payload, headers=headers)
+    response = requests.post(LOGIN_URL, json=payload)
     if response.status_code == 200:
+        TOKEN = response.json().get("access_token")
         print("✅ Logged in to FOREX.com API")
-        # Get trading accounts
-        acc_response = session.get("https://ciapi.cityindex.com/TradingAPI/useraccount/" )
-        if acc_response.status_code == 200:
-            accounts = acc_response.json().get("TradingAccounts", [])
-            if accounts:
-                account_id = accounts[0]["TradingAccountId"]
-                print(f"📌 Using Account ID: {account_id}")
-            else:
-                print("❌ No trading accounts found.")
-        else:
-            print(f"❌ Failed to fetch accounts: {acc_response.text}")
     else:
-        print(f"❌ Login failed: {response.status_code}")
-        print(response.text)
+        print("❌ Login failed", response.text)
+
 
 def place_order(order_type):
-    global account_id
-    if not account_id:
-        print("❌ Cannot place order without a valid account ID")
-        return
-
-    url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
-
+    if not TOKEN:
+        login()
+    
     headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json"
     }
 
-    payload = {
-        "MarketId": 401484347,  # EUR/USD
-        "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1000,
-        "TradingAccountId": account_id,
-        "PositionMethodId": 1,
-        "AuditId": "bot"
+    order_data = {
+        "market": "EUR/USD",
+        "quantity": 1000,
+        "action": "BUY" if order_type == "BUY" else "SELL",
+        "orderType": "Market"
     }
 
-    response = session.post(url, json=payload, headers=headers)
-    if response.status_code == 200:
+    response = requests.post(ORDER_URL, headers=headers, json=order_data)
+    if response.status_code == 201:
         print(f"✅ {order_type} order placed successfully")
     else:
-        print(f"❌ Failed to place {order_type} order: {response.status_code}")
-        print(response.text)
+        print(f"❌ Failed to place {order_type} order", response.text)
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
-    print(f"🚨 TradingView Alert Received: {data}")
-    message = data.get("message")
+    data = request.json
+    print("🚨 TradingView Alert Received:", data)
 
-    if "BUY" in message.upper():
+    if not data or "message" not in data:
+        return {"status": "ignored", "reason": "no valid message"}, 400
+
+    message = data["message"].strip().upper()
+    if message == "BUY EURUSD":
         place_order("BUY")
-    elif "SELL" in message.upper():
+    elif message == "SELL EURUSD":
         place_order("SELL")
     else:
-        print("⚠️ Unknown command in message")
-    return jsonify({"status": "ok"})
+        return {"status": "ignored", "reason": "unknown command"}, 400
+
+    return {"status": "success"}, 200
+
 
 if __name__ == "__main__":
-    login_to_forex()
-    app.run(host="0.0.0.0", port=10000)
+    login()
+    app.run(debug=True, port=5000)
