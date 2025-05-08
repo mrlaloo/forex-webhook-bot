@@ -42,7 +42,8 @@ def place_order(order_type):
         "Direction": "buy" if order_type == "BUY" else "sell",
         "Quantity": 1,
         "OrderType": "market",
-        "TradingAccountId": int(account_id),
+       "TradingAccountId": os.getenv("FOREX_ACCOUNT_ID"),
+
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
