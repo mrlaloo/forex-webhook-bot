@@ -5,11 +5,9 @@ import os
 
 app = Flask(__name__)
 session = requests.Session()
-account_id = None  # Global variable to store TradingAccountId
 
 # --- FOREX.COM LOGIN ---
 def login_to_forex():
-    global account_id
     url = "https://ciapi.cityindex.com/TradingAPI/session"
     payload = {
         "UserName": os.getenv("FOREX_EMAIL"),
@@ -24,31 +22,22 @@ def login_to_forex():
     response = session.post(url, json=payload, headers=headers)
     if response.status_code == 200:
         print("✅ Logged in to FOREX.com API")
-
-        # Fetch account ID dynamically
-        acc_response = session.get("https://ciapi.cityindex.com/TradingAPI/useraccount", headers=headers)
-        if acc_response.status_code == 200:
-            account_id = acc_response.json()["TradingAccounts"][0]["TradingAccountId"]
-            print(f"✅ TradingAccountId fetched: {account_id}")
-        else:
-            print("❌ Failed to fetch TradingAccountId")
-            print(acc_response.text)
-
     else:
         print(f"❌ Login failed: {response.status_code}")
         print(response.text)
 
 # --- PLACE ORDER FUNCTION ---
 def place_order(order_type):
-    global account_id
+    account_id = "DF029066"  # Hardcoded account ID
     url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
 
     payload = {
-        "MarketId": 401484347,  # EUR/USD
+        "MarketId": 401484347,
         "Direction": "buy" if order_type == "BUY" else "sell",
         "Quantity": 1000,
         "OrderType": "market",
@@ -58,6 +47,7 @@ def place_order(order_type):
     }
 
     response = session.post(url, json=payload, headers=headers)
+
     if response.status_code == 401:
         print("🔁 Session expired. Re-logging in...")
         login_to_forex()
