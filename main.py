@@ -28,29 +28,32 @@ def login_to_forex():
 
 # --- PLACE ORDER FUNCTION ---
 def place_order(order_type):
+    account_id = int(os.getenv("FOREX_ACCOUNT_ID"))
     url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
-    account_id = os.getenv("FOREX_ACCOUNT_ID")
 
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
+    def get_headers():
+        return {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
 
     payload = {
-        "MarketId": 401484347,  # EUR/USD
+        "MarketId": 401484347,
         "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1000,  # ✅ Use at least 1000 units
+        "Quantity": 1000,  # Minimum lot size
         "OrderType": "market",
-        "TradingAccountId": int(account_id),
+        "TradingAccountId": account_id,
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
 
+    headers = get_headers()
     response = session.post(url, json=payload, headers=headers)
 
     if response.status_code == 401:
         print("🔁 Session expired. Re-logging in...")
         login_to_forex()
+        headers = get_headers()
         response = session.post(url, json=payload, headers=headers)
 
     if response.status_code == 200:
