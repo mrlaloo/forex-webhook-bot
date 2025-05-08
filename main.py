@@ -20,41 +20,39 @@ def login_to_forex():
     }
 
     response = session.post(url, json=payload, headers=headers)
+
     if response.status_code == 200:
         print("✅ Logged in to FOREX.com API")
+        # Save tokens to session headers for reuse
+        session.headers.update({
+            "CST": response.headers.get("CST", ""),
+            "X-SECURITY-TOKEN": response.headers.get("X-SECURITY-TOKEN", "")
+        })
     else:
         print(f"❌ Login failed: {response.status_code}")
         print(response.text)
 
 # --- PLACE ORDER FUNCTION ---
 def place_order(order_type):
-    account_id = int(os.getenv("FOREX_ACCOUNT_ID"))
+    account_id = int(os.getenv("FOREX_ACCOUNT_ID"))  # Ensure it's a pure integer
     url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
 
-    def get_headers():
-        return {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-
     payload = {
-        "MarketId": 401484347,
+        "MarketId": 401484347,  # EUR/USD Market ID
         "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1000,  # Minimum lot size
+        "Quantity": 1000,  # Minimum trade size
         "OrderType": "market",
         "TradingAccountId": account_id,
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
 
-    headers = get_headers()
-    response = session.post(url, json=payload, headers=headers)
+    response = session.post(url, json=payload)
 
     if response.status_code == 401:
         print("🔁 Session expired. Re-logging in...")
         login_to_forex()
-        headers = get_headers()
-        response = session.post(url, json=payload, headers=headers)
+        response = session.post(url, json=payload)
 
     if response.status_code == 200:
         print(f"✅ {order_type} order placed successfully")
