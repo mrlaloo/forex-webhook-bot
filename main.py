@@ -1,106 +1,103 @@
-from flask import Flask, request
-import datetime
-import requests
 import os
+import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-session = requests.Session()
-account_id = None  # will store Trading Account ID dynamically
 
-# --- FOREX.COM LOGIN ---
+SESSION = requests.Session()
+BASE_URL = "https://ciapi-ci-demo.fxcorporate.com"
+LOGIN_URL = f"{BASE_URL}/session"
+ACCOUNTS_URL = f"{BASE_URL}/TradingAccounts"
+ORDER_URL = f"{BASE_URL}/order/newtradeorder"
+
+
 def login_to_forex():
-    global account_id
-
-    url = "https://ciapi.cityindex.com/TradingAPI/session"
+    email = os.getenv("FOREX_EMAIL")
+    password = os.getenv("FOREX_PASSWORD")
+    
     payload = {
-        "UserName": os.getenv("FOREX_EMAIL"),
-        "Password": os.getenv("FOREX_PASSWORD"),
-        "AppKey": "3c5ddbf9ff634a0b86f07a5c132b048b"
+        "UserName": email,
+        "Password": password,
+        "AppKey": "WebAPI"
     }
+
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
 
-    response = session.post(url, json=payload, headers=headers)
+    response = SESSION.post(LOGIN_URL, json=payload, headers=headers)
 
     if response.status_code == 200:
         print("✅ Logged in to FOREX.com API")
-
-        # Fetch Trading Account ID dynamically
-        account_response = session.get("https://ciapi.cityindex.com/TradingAPI/useraccount", headers=headers)
-        if account_response.status_code == 200:
-            accounts = account_response.json().get("TradingAccounts", [])
-            if accounts:
-                account_id = accounts[0].get("TradingAccountId")
-                print(f"✅ Retrieved Trading Account ID: {account_id}")
-            else:
-                print("❌ No trading accounts found.")
-        else:
-            print("❌ Failed to retrieve Trading Account ID")
-            print(account_response.text)
     else:
         print(f"❌ Login failed: {response.status_code}")
         print(response.text)
 
 
-# --- PLACE ORDER FUNCTION ---
+def get_trading_account_id():
+    response = SESSION.get(ACCOUNTS_URL)
+
+    if response.status_code == 200:
+        accounts = response.json()["TradingAccounts"]
+        if accounts:
+            return accounts[0]["TradingAccountId"]
+        else:
+            print("⚠️ No trading accounts found.")
+    else:
+        print("❌ Failed to retrieve Trading Account ID")
+        print(response.text)
+    return None
+
+
 def place_order(order_type):
+    account_id = get_trading_account_id()
     if not account_id:
         print("❌ Cannot place order without a valid account ID")
         return
 
-    url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
-    headers = {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
-
     payload = {
         "MarketId": 401484347,  # EUR/USD
         "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1000,  # minimum quantity
+        "Quantity": 1000,
         "OrderType": "market",
         "TradingAccountId": account_id,
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
 
-    response = session.post(url, json=payload, headers=headers)
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
+    response = SESSION.post(ORDER_URL, json=payload, headers=headers)
 
     if response.status_code == 401:
-        print("🔁 Session expired. Re-logging in...")
+        print("🔒 Session expired. Re-logging in...")
         login_to_forex()
-        response = session.post(url, json=payload, headers=headers)
+        response = SESSION.post(ORDER_URL, json=payload, headers=headers)
 
     if response.status_code == 200:
-        print(f"✅ {order_type} order placed successfully")
+        print("✅ Order placed successfully!")
     else:
         print(f"❌ Failed to place {order_type} order: {response.status_code}")
         print(response.text)
 
 
-# --- WEBHOOK ENDPOINT ---
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-    message = data.get('message', '')
+    print(f"🚨 TradingView Alert Received: {data.get('ticker')}")
 
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[{now}] 🔔 TradingView Alert Received: {message}")
-
-    if "BUY EURUSD" in message.upper():
-        place_order("BUY")
-    elif "SELL EURUSD" in message.upper():
-        place_order("SELL")
+    order_type = data.get("order", "").upper()
+    if order_type in ["BUY", "SELL"]:
+        place_order(order_type)
+        return jsonify({"status": "success"}), 200
     else:
-        print("⚠️ Unrecognized message format")
-
-    return {'status': 'ok'}, 200
+        return jsonify({"error": "Invalid order type"}), 400
 
 
-# --- START APP ---
-login_to_forex()
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+if __name__ == "__main__":
+    login_to_forex()
+    app.run(host="0.0.0.0", port=10000)
