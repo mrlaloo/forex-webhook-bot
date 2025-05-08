@@ -20,7 +20,6 @@ def login_to_forex():
     }
 
     response = session.post(url, json=payload, headers=headers)
-
     if response.status_code == 200:
         print("✅ Logged in to FOREX.com API")
     else:
@@ -29,8 +28,8 @@ def login_to_forex():
 
 # --- PLACE ORDER FUNCTION ---
 def place_order(order_type):
-    account_id = os.getenv("FOREX_ACCOUNT_ID")
     url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
+    account_id = os.getenv("FOREX_ACCOUNT_ID")
 
     headers = {
         "Content-Type": "application/json",
@@ -38,11 +37,11 @@ def place_order(order_type):
     }
 
     payload = {
-        "MarketId": 401484347,
+        "MarketId": 401484347,  # EUR/USD
         "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1,
+        "Quantity": 1000,  # ✅ Use at least 1000 units
         "OrderType": "market",
-        "TradingAccountId": account_id,  # Leave as string
+        "TradingAccountId": int(account_id),
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
