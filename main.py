@@ -39,14 +39,15 @@ def place_order(order_type):
     }
 
     payload = {
-        "MarketId": 401484347,
-        "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1,
-        "OrderType": "market",
-       "TradingAccountId": os.getenv("FOREX_ACCOUNT_ID"),
+    "MarketId": 401484347,
+    "Direction": "buy" if order_type == "BUY" else "sell",
+    "Quantity": 1,
+    "OrderType": "market",
+    "TradingAccountId": int(os.getenv("FOREX_ACCOUNT_ID")),
+    "AuditId": "webhook",
+    "MarketName": "EUR/USD"
 
-        "AuditId": "webhook",
-        "MarketName": "EUR/USD"
+
     }
 
     response = session.post(url, json=payload, headers=headers)
