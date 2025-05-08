@@ -5,9 +5,13 @@ import os
 
 app = Flask(__name__)
 session = requests.Session()
+trading_account_id = None  # global to hold fetched account ID
+
 
 # --- FOREX.COM LOGIN ---
 def login_to_forex():
+    global trading_account_id
+
     url = "https://ciapi.cityindex.com/TradingAPI/session"
     payload = {
         "UserName": os.getenv("FOREX_EMAIL"),
@@ -22,13 +26,17 @@ def login_to_forex():
     response = session.post(url, json=payload, headers=headers)
     if response.status_code == 200:
         print("✅ Logged in to FOREX.com API")
+        result = response.json()
+        trading_account_id = result["TradingAccounts"][0]["TradingAccountId"]
+        print(f"📌 Using TradingAccountId: {trading_account_id}")
     else:
         print(f"❌ Login failed: {response.status_code}")
         print(response.text)
 
+
 # --- PLACE ORDER FUNCTION ---
 def place_order(order_type):
-    account_id = "DF029066"  # Hardcoded account ID
+    global trading_account_id
     url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
 
     headers = {
@@ -41,7 +49,7 @@ def place_order(order_type):
         "Direction": "buy" if order_type == "BUY" else "sell",
         "Quantity": 1000,
         "OrderType": "market",
-        "TradingAccountId": account_id,
+        "TradingAccountId": trading_account_id,
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
@@ -51,6 +59,7 @@ def place_order(order_type):
     if response.status_code == 401:
         print("🔁 Session expired. Re-logging in...")
         login_to_forex()
+        payload["TradingAccountId"] = trading_account_id  # refresh
         response = session.post(url, json=payload, headers=headers)
 
     if response.status_code == 200:
@@ -58,6 +67,7 @@ def place_order(order_type):
     else:
         print(f"❌ Failed to place {order_type} order: {response.status_code}")
         print(response.text)
+
 
 # --- WEBHOOK ENDPOINT ---
 @app.route('/webhook', methods=['POST'])
@@ -76,6 +86,7 @@ def webhook():
         print("⚠️ Unrecognized message format")
 
     return {'status': 'ok'}, 200
+
 
 # --- START APP ---
 login_to_forex()
