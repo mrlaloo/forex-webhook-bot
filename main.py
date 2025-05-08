@@ -1,15 +1,13 @@
 import os
 import json
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Environment variables
-OANDA_API_KEY = os.getenv("OANDA_API_KEY")
-OANDA_ACCOUNT_ID = os.getenv("FOREX_ACCOUNT_ID")
+OANDA_API_KEY = os.getenv('OANDA_API_KEY')
+OANDA_ACCOUNT_ID = os.getenv('FOREX_ACCOUNT_ID')  # Retain this name for backward compatibility
 
-# OANDA API endpoint
 OANDA_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/orders"
 HEADERS = {
     "Authorization": f"Bearer {OANDA_API_KEY}",
@@ -22,35 +20,29 @@ def webhook():
     print("Alert Received:", data)
 
     if "message" not in data:
-        return {"error": "No message field found"}, 400
+        return jsonify({"error": "Missing message field"}), 400
 
-    message = data["message"].strip().upper()
+    signal = data["message"].strip().upper()
+    if signal not in ["BUY EURUSD", "SELL EURUSD"]:
+        return jsonify({"error": "Invalid signal format"}), 400
 
-    if message == "BUY EURUSD":
-        return place_order("EUR_USD", "buy")
-    elif message == "SELL EURUSD":
-        return place_order("EUR_USD", "sell")
-    else:
-        return {"error": "Unknown message"}, 400
-
-def place_order(instrument, side):
+    side = "buy" if "BUY" in signal else "sell"
     order_data = {
         "order": {
+            "instrument": "EUR_USD",
             "units": "100" if side == "buy" else "-100",
-            "instrument": instrument,
-            "timeInForce": "FOK",
             "type": "MARKET",
             "positionFill": "DEFAULT"
         }
     }
 
-    response = requests.post(OANDA_URL, headers=HEADERS, data=json.dumps(order_data))
-    print("Order Response:", response.text)
-
-    if response.status_code == 201:
-        return {"status": "Order placed successfully"}, 201
-    else:
-        return {"error": response.text}, response.status_code
+    try:
+        response = requests.post(OANDA_URL, headers=HEADERS, json=order_data)
+        print("Order Response:", response.text)
+        return jsonify(response.json()), response.status_code
+    except Exception as e:
+        print("Exception:", str(e))
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)
