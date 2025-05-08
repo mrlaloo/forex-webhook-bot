@@ -5,9 +5,11 @@ import os
 
 app = Flask(__name__)
 session = requests.Session()
+trading_account_id = None  # will be fetched dynamically after login
 
 # --- FOREX.COM LOGIN ---
 def login_to_forex():
+    global trading_account_id
     url = "https://ciapi.cityindex.com/TradingAPI/session"
     payload = {
         "UserName": os.getenv("FOREX_EMAIL"),
@@ -23,6 +25,18 @@ def login_to_forex():
 
     if response.status_code == 200:
         print("✅ Logged in to FOREX.com API")
+
+        # Fetch Trading Account ID
+        account_url = "https://ciapi.cityindex.com/TradingAPI/useraccount/ClientAndTradingAccount"
+        account_response = session.get(account_url, headers=headers)
+
+        if account_response.status_code == 200:
+            accounts = account_response.json()
+            trading_account_id = accounts["TradingAccounts"][0]["TradingAccountId"]
+            print(f"✅ Trading Account ID: {trading_account_id}")
+        else:
+            print("❌ Failed to retrieve Trading Account ID")
+            print(account_response.text)
     else:
         print(f"❌ Login failed: {response.status_code}")
         print(response.text)
@@ -36,10 +50,11 @@ def place_order(order_type):
     }
 
     payload = {
-        "MarketId": 401484347,
+        "MarketId": 401484347,  # EUR/USD
         "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1000,
+        "Quantity": 1000,  # minimum valid trade size
         "OrderType": "market",
+        "TradingAccountId": trading_account_id,
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
@@ -75,5 +90,8 @@ def webhook():
 
     return {'status': 'ok'}, 200
 
-# --- LOGIN BEFORE FIRST REQUEST ---
+# --- START APP ---
 login_to_forex()
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8080)
