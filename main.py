@@ -5,72 +5,52 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# Load credentials from environment
-FOREX_EMAIL = os.environ.get("FOREX_EMAIL")
-FOREX_PASSWORD = os.environ.get("FOREX_PASSWORD")
-FOREX_ACCOUNT_ID = os.environ.get("FOREX_ACCOUNT_ID")
+# Environment variables
+OANDA_API_KEY = os.getenv("OANDA_API_KEY")
+OANDA_ACCOUNT_ID = os.getenv("FOREX_ACCOUNT_ID")
 
-# Constants
-LOGIN_URL = "https://api-demo.forex.com/auth/token"
-ORDER_URL = f"https://api-demo.forex.com/accounts/{FOREX_ACCOUNT_ID}/orders"
-TOKEN = None
-
-def login():
-    global TOKEN
-    payload = {
-        "identifier": FOREX_EMAIL,
-        "password": FOREX_PASSWORD
-    }
-    response = requests.post(LOGIN_URL, json=payload)
-    if response.status_code == 200:
-        TOKEN = response.json().get("access_token")
-        print("✅ Logged in to FOREX.com API")
-    else:
-        print("❌ Login failed", response.text)
-
-
-def place_order(order_type):
-    if not TOKEN:
-        login()
-    
-    headers = {
-        "Authorization": f"Bearer {TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    order_data = {
-        "market": "EUR/USD",
-        "quantity": 1000,
-        "action": "BUY" if order_type == "BUY" else "SELL",
-        "orderType": "Market"
-    }
-
-    response = requests.post(ORDER_URL, headers=headers, json=order_data)
-    if response.status_code == 201:
-        print(f"✅ {order_type} order placed successfully")
-    else:
-        print(f"❌ Failed to place {order_type} order", response.text)
-
+# OANDA API endpoint
+OANDA_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/orders"
+HEADERS = {
+    "Authorization": f"Bearer {OANDA_API_KEY}",
+    "Content-Type": "application/json"
+}
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
-    print("🚨 TradingView Alert Received:", data)
+    data = request.get_json()
+    print("Alert Received:", data)
 
-    if not data or "message" not in data:
-        return {"status": "ignored", "reason": "no valid message"}, 400
+    if "message" not in data:
+        return {"error": "No message field found"}, 400
 
     message = data["message"].strip().upper()
+
     if message == "BUY EURUSD":
-        place_order("BUY")
+        return place_order("EUR_USD", "buy")
     elif message == "SELL EURUSD":
-        place_order("SELL")
+        return place_order("EUR_USD", "sell")
     else:
-        return {"status": "ignored", "reason": "unknown command"}, 400
+        return {"error": "Unknown message"}, 400
 
-    return {"status": "success"}, 200
+def place_order(instrument, side):
+    order_data = {
+        "order": {
+            "units": "100" if side == "buy" else "-100",
+            "instrument": instrument,
+            "timeInForce": "FOK",
+            "type": "MARKET",
+            "positionFill": "DEFAULT"
+        }
+    }
 
+    response = requests.post(OANDA_URL, headers=HEADERS, data=json.dumps(order_data))
+    print("Order Response:", response.text)
+
+    if response.status_code == 201:
+        return {"status": "Order placed successfully"}, 201
+    else:
+        return {"error": response.text}, response.status_code
 
 if __name__ == "__main__":
-    login()
-    app.run(debug=True, port=5000)
+    app.run(debug=True)
