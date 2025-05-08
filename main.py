@@ -5,9 +5,11 @@ import os
 
 app = Flask(__name__)
 session = requests.Session()
+account_id = None  # Global variable to store TradingAccountId
 
 # --- FOREX.COM LOGIN ---
 def login_to_forex():
+    global account_id
     url = "https://ciapi.cityindex.com/TradingAPI/session"
     payload = {
         "UserName": os.getenv("FOREX_EMAIL"),
@@ -20,39 +22,46 @@ def login_to_forex():
     }
 
     response = session.post(url, json=payload, headers=headers)
-
     if response.status_code == 200:
         print("✅ Logged in to FOREX.com API")
-        # Save tokens to session headers for reuse
-        session.headers.update({
-            "CST": response.headers.get("CST", ""),
-            "X-SECURITY-TOKEN": response.headers.get("X-SECURITY-TOKEN", "")
-        })
+
+        # Fetch account ID dynamically
+        acc_response = session.get("https://ciapi.cityindex.com/TradingAPI/useraccount", headers=headers)
+        if acc_response.status_code == 200:
+            account_id = acc_response.json()["TradingAccounts"][0]["TradingAccountId"]
+            print(f"✅ TradingAccountId fetched: {account_id}")
+        else:
+            print("❌ Failed to fetch TradingAccountId")
+            print(acc_response.text)
+
     else:
         print(f"❌ Login failed: {response.status_code}")
         print(response.text)
 
 # --- PLACE ORDER FUNCTION ---
 def place_order(order_type):
-    account_id = int(os.getenv("FOREX_ACCOUNT_ID"))  # Ensure it's a pure integer
+    global account_id
     url = "https://ciapi.cityindex.com/TradingAPI/order/newtradeorder"
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
 
     payload = {
-        "MarketId": 401484347,  # EUR/USD Market ID
+        "MarketId": 401484347,  # EUR/USD
         "Direction": "buy" if order_type == "BUY" else "sell",
-        "Quantity": 1000,  # Minimum trade size
+        "Quantity": 1000,
         "OrderType": "market",
         "TradingAccountId": account_id,
         "AuditId": "webhook",
         "MarketName": "EUR/USD"
     }
 
-    response = session.post(url, json=payload)
-
+    response = session.post(url, json=payload, headers=headers)
     if response.status_code == 401:
         print("🔁 Session expired. Re-logging in...")
         login_to_forex()
-        response = session.post(url, json=payload)
+        response = session.post(url, json=payload, headers=headers)
 
     if response.status_code == 200:
         print(f"✅ {order_type} order placed successfully")
