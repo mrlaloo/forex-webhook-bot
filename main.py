@@ -1,3 +1,4 @@
+# === Flask Bot with TP & SL for OANDA ===
 import os
 import json
 import requests
@@ -14,6 +15,10 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+# === Configurable TP/SL ===
+TAKE_PROFIT_PIPS = 40
+STOP_LOSS_PIPS = 20
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -27,20 +32,29 @@ def webhook():
         return jsonify({"error": "Invalid signal format"}), 400
 
     side = "buy" if "BUY" in signal else "sell"
+    units = "1000" if side == "buy" else "-1000"
 
-    order_data = {
+    # Simulate price (can be real-time fetched for precision)
+    price = 1.1250
+    pip = 0.0001
+    tp_price = price + TAKE_PROFIT_PIPS * pip if side == "buy" else price - TAKE_PROFIT_PIPS * pip
+    sl_price = price - STOP_LOSS_PIPS * pip if side == "buy" else price + STOP_LOSS_PIPS * pip
+
+    order = {
         "order": {
+            "units": units,
             "instrument": "EUR_USD",
-            "units": "1000" if side == "buy" else "-1000",
+            "timeInForce": "FOK",
             "type": "MARKET",
-            "positionFill": "DEFAULT"
+            "positionFill": "DEFAULT",
+            "takeProfitOnFill": {"price": f"{tp_price:.5f}"},
+            "stopLossOnFill": {"price": f"{sl_price:.5f}"}
         }
     }
 
-    response = requests.post(OANDA_URL, headers=HEADERS, json=order_data)
+    response = requests.post(OANDA_URL, headers=HEADERS, json=order)
     print("Order Response:", response.text)
+    return jsonify(response.json())
 
-    if response.status_code != 201:
-        return jsonify({"error": "Order placement failed", "details": response.text}), 500
-
-    return jsonify({"message": "Order placed successfully"})
+if __name__ == "__main__":
+    app.run(debug=True)
