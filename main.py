@@ -1,23 +1,24 @@
-# === Flask Bot with TP & SL for OANDA ===
 import os
 import json
 import requests
+import threading
+import time
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 OANDA_API_KEY = os.getenv('OANDA_API_KEY')
 OANDA_ACCOUNT_ID = os.getenv('OANDA_ACCOUNT_ID')
-
-OANDA_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/orders"
+OANDA_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/"
 HEADERS = {
     "Authorization": f"Bearer {OANDA_API_KEY}",
     "Content-Type": "application/json"
 }
 
-# === Configurable TP/SL ===
-TAKE_PROFIT_PIPS = 40
-STOP_LOSS_PIPS = 20
+# Store trades and their max profit prices
+open_trades = {}  # trade_id: {"entry": float, "max_price": float}
+TRAILING_STOP_PIPS = 10  # Set trailing stop in pips
+PIP_VALUE = 0.0001  # For EUR/USD
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -34,27 +35,71 @@ def webhook():
     side = "buy" if "BUY" in signal else "sell"
     units = "1000" if side == "buy" else "-1000"
 
-    # Simulate price (can be real-time fetched for precision)
-    price = 1.1250
-    pip = 0.0001
-    tp_price = price + TAKE_PROFIT_PIPS * pip if side == "buy" else price - TAKE_PROFIT_PIPS * pip
-    sl_price = price - STOP_LOSS_PIPS * pip if side == "buy" else price + STOP_LOSS_PIPS * pip
-
     order = {
         "order": {
-            "units": units,
             "instrument": "EUR_USD",
-            "timeInForce": "FOK",
+            "units": units,
             "type": "MARKET",
-            "positionFill": "DEFAULT",
-            "takeProfitOnFill": {"price": f"{tp_price:.5f}"},
-            "stopLossOnFill": {"price": f"{sl_price:.5f}"}
+            "timeInForce": "FOK",
+            "positionFill": "DEFAULT"
         }
     }
 
-    response = requests.post(OANDA_URL, headers=HEADERS, json=order)
-    print("Order Response:", response.text)
-    return jsonify(response.json())
+    response = requests.post(OANDA_URL + "orders", headers=HEADERS, json=order)
+    if response.status_code == 201:
+        order_data = response.json()
+        trade_id = order_data["orderCreateTransaction"]["id"]
+        price = float(order_data["orderCreateTransaction"]["price"])
+        open_trades[trade_id] = {"entry": price, "max_price": price, "side": side}
+        print(f"Trade opened: {trade_id}, entry: {price}")
+    else:
+        print("Order failed:", response.text)
+
+    return jsonify({"status": "executed"}), 200
+
+def trailing_watchdog():
+    while True:
+        time.sleep(30)  # Check every 30s
+        try:
+            r = requests.get(OANDA_URL + "openPositions", headers=HEADERS)
+            positions = r.json().get("positions", [])
+
+            for pos in positions:
+                if pos["instrument"] != "EUR_USD":
+                    continue
+
+                side = "buy" if float(pos["long"]["units"]) != 0 else "sell"
+                unrealized_pl = float(pos["unrealizedPL"])
+                price = float(pos["long"]["averagePrice"] if side == "buy" else pos["short"]["averagePrice"])
+                market_price = get_current_price()
+
+                trailing_stop = TRAILING_STOP_PIPS * PIP_VALUE
+                if side == "buy":
+                    max_price = max(open_trades.get(pos["pl"]["tradeID"], {}).get("max_price", price), market_price)
+                    open_trades[pos["pl"]["tradeID"]]["max_price"] = max_price
+                    if market_price < (max_price - trailing_stop):
+                        close_trade(pos["pl"]["tradeID"], side)
+                else:
+                    min_price = min(open_trades.get(pos["pl"]["tradeID"], {}).get("max_price", price), market_price)
+                    open_trades[pos["pl"]["tradeID"]]["max_price"] = min_price
+                    if market_price > (min_price + trailing_stop):
+                        close_trade(pos["pl"]["tradeID"], side)
+
+        except Exception as e:
+            print("Watchdog error:", e)
+
+def get_current_price():
+    r = requests.get("https://api-fxpractice.oanda.com/v3/instruments/EUR_USD/price", headers=HEADERS)
+    price_data = r.json()["prices"][0]
+    return float(price_data["asks"][0]["price"])
+
+def close_trade(trade_id, side):
+    data = {"units": "1000" if side == "buy" else "-1000"}
+    r = requests.put(OANDA_URL + f"positions/EUR_USD/close", headers=HEADERS, json=data)
+    print(f"Closed trade {trade_id}: {r.status_code}, {r.text}")
+
+# Start trailing stop watcher in background
+threading.Thread(target=trailing_watchdog, daemon=True).start()
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(port=5000)
