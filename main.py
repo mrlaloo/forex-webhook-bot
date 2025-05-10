@@ -1,92 +1,129 @@
-import os
-import json
+# OANDA Forex Bot
+# Risk: $200/trade, TP: 20 pips, SL: 10 pips, trailing SL +5 at +10
+# Pairs: EUR/USD, GBP/USD, USD/JPY, USD/CHF
+# Live on demo OANDA account
+
 import requests
-from flask import Flask, request, jsonify
+import time
+import pandas as pd
 
-app = Flask(__name__)
+# CONFIG
+ACCOUNT_ID = "101-001-31681050-001"
+API_KEY = "b02fade68c4d663a99df9ea55149581c-56d0c6dd9202d0d126d034f6d123adcb"
+USE_PRACTICE = True
+RISK_USD = 200
+STOP_LOSS_PIPS = 10
+TAKE_PROFIT_PIPS = 20
+TRAIL_TRIGGER_PIPS = 10
+TRAIL_SL_PIPS = 5
+PAIRS = ["EUR_USD", "GBP_USD", "USD_JPY", "USD_CHF"]
+MAX_TRADES = 4
 
-# Load OANDA credentials
-OANDA_API_KEY = os.getenv('OANDA_API_KEY')
-OANDA_ACCOUNT_ID = os.getenv('OANDA_ACCOUNT_ID')
-
-# API endpoints
-OANDA_ORDER_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/orders"
-OANDA_TRADE_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/openTrades"
-OANDA_CLOSE_TRADE_URL = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/trades"
-
-# Headers
+BASE_URL = "https://api-fxpractice.oanda.com" if USE_PRACTICE else "https://api-fxtrade.oanda.com"
 HEADERS = {
-    "Authorization": f"Bearer {OANDA_API_KEY}",
+    "Authorization": f"Bearer {API_KEY}",
     "Content-Type": "application/json"
 }
 
-# Parameters
-TRAIL_PIPS = 10  # pip distance to trail profit
+# Position sizing (based on pip value of ~$10 per lot)
+def calculate_lot_size(risk_usd, stop_loss_pips):
+    return round(risk_usd / (stop_loss_pips * 10), 2)
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json()
-    print("Alert Received:", data)
+# Fetch candle data and compute EMA + VWAP
+def get_indicators(pair, count=50):
+    url = f"{BASE_URL}/v3/instruments/{pair}/candles?count={count}&granularity=M5&price=M"
+    r = requests.get(url, headers=HEADERS)
+    candles = r.json()['candles']
+    closes = [float(c['mid']['c']) for c in candles if c['complete']]
+    highs = [float(c['mid']['h']) for c in candles if c['complete']]
+    lows = [float(c['mid']['l']) for c in candles if c['complete']]
+    vols = [int(c['volume']) for c in candles if c['complete']]
 
-    if "message" not in data:
-        return jsonify({"error": "Missing message field"}), 400
+    df = pd.DataFrame({
+        'close': closes,
+        'high': highs,
+        'low': lows,
+        'volume': vols
+    })
 
-    signal = data["message"].strip().upper()
-    if signal not in ["BUY EURUSD", "SELL EURUSD"]:
-        return jsonify({"error": "Invalid signal format"}), 400
+    df['ema_9'] = df['close'].ewm(span=9).mean()
+    df['ema_21'] = df['close'].ewm(span=21).mean()
+    df['vwap'] = (df['close'] * df['volume']).cumsum() / df['volume'].cumsum()
+    return df
 
-    side = "buy" if "BUY" in signal else "sell"
-    units = "1000" if side == "buy" else "-1000"
+# Determine entry signal
 
-    order_data = {
+def check_entry_signal(df):
+    if len(df) < 22:
+        return False, None
+
+    latest = df.iloc[-1]
+    previous = df.iloc[-2]
+
+    # Buy if EMA9 crossed above EMA21 and price is above VWAP
+    if previous['ema_9'] < previous['ema_21'] and latest['ema_9'] > latest['ema_21'] and latest['close'] > latest['vwap']:
+        return True, "buy"
+
+    # Sell if EMA9 crossed below EMA21 and price is below VWAP
+    if previous['ema_9'] > previous['ema_21'] and latest['ema_9'] < latest['ema_21'] and latest['close'] < latest['vwap']:
+        return True, "sell"
+
+    return False, None
+
+# Get mid price
+
+def get_price(pair):
+    url = f"{BASE_URL}/v3/accounts/{ACCOUNT_ID}/pricing?instruments={pair}"
+    r = requests.get(url, headers=HEADERS)
+    prices = r.json()
+    bids = float(prices['prices'][0]['bids'][0]['price'])
+    asks = float(prices['prices'][0]['asks'][0]['price'])
+    return (bids + asks) / 2
+
+# Place a trade
+
+def place_trade(pair, units, side, sl_pips, tp_pips):
+    price = get_price(pair)
+    sl = price - sl_pips * 0.0001 if side == "buy" else price + sl_pips * 0.0001
+    tp = price + tp_pips * 0.0001 if side == "buy" else price - tp_pips * 0.0001
+
+    data = {
         "order": {
-            "instrument": "EUR_USD",
-            "units": units,
+            "instrument": pair,
+            "units": str(units if side == "buy" else -units),
             "type": "MARKET",
-            "timeInForce": "FOK",
-            "positionFill": "DEFAULT"
+            "positionFill": "DEFAULT",
+            "takeProfitOnFill": {"price": f"{tp:.5f}"},
+            "stopLossOnFill": {"price": f"{sl:.5f}"},
+            "clientExtensions": {"tag": "#ProjectCIPHER-FX"}
         }
     }
 
-    response = requests.post(OANDA_ORDER_URL, headers=HEADERS, json=order_data)
-    print("Order Response:", response.json())
-    return jsonify(response.json())
+    url = f"{BASE_URL}/v3/accounts/{ACCOUNT_ID}/orders"
+    r = requests.post(url, headers=HEADERS, json=data)
+    return r.json()
 
-@app.route("/watchdog", methods=["GET"])
-def watchdog():
-    price_url = f"https://api-fxpractice.oanda.com/v3/accounts/{OANDA_ACCOUNT_ID}/pricing?instruments=EUR_USD"
-    r = requests.get(price_url, headers=HEADERS)
+# Main loop
+while True:
     try:
-        prices = r.json()["prices"]
-        print("Watchdog price check:", prices)
-        return jsonify({"status": "ok", "prices": prices})
-    except KeyError:
-        print("Watchdog error: 'prices' field missing")
-        print("Full response:", r.json())
-        return jsonify({"status": "error", "detail": "'prices' field missing"}), 500
+        for pair in PAIRS:
+            df = get_indicators(pair)
+            signal, side = check_entry_signal(df)
 
-@app.route("/trail", methods=["GET"])
-def trail():
-    trades = requests.get(OANDA_TRADE_URL, headers=HEADERS).json()
-    if "trades" not in trades:
-        return jsonify({"error": "No open trades found"}), 404
+            if signal:
+                lot_size = calculate_lot_size(RISK_USD, STOP_LOSS_PIPS)
+                units = int(lot_size * 100000)
+                print(f"Signal for {pair}: {side.upper()} — placing trade")
+                result = place_trade(pair, units, side, STOP_LOSS_PIPS, TAKE_PROFIT_PIPS)
+                print(result)
+            else:
+                print(f"No signal for {pair}")
 
-    for trade in trades["trades"]:
-        trade_id = trade["id"]
-        current_price = float(trade["price"])
-        unrealized_pl = float(trade["unrealizedPL"])
+            time.sleep(2)
 
-        # OANDA reports in account currency, pip approximation is 0.0001 for EURUSD
-        profit_pips = unrealized_pl / 0.1
+        print("Cycle complete. Waiting 1 minute...")
+        time.sleep(60)
 
-        print(f"Checking trade {trade_id} @ {current_price} | PL: {unrealized_pl} ({profit_pips:.1f} pips)")
-
-        if profit_pips >= TRAIL_PIPS:
-            close_url = f"{OANDA_CLOSE_TRADE_URL}/{trade_id}/close"
-            close_response = requests.put(close_url, headers=HEADERS)
-            print(f"Trade {trade_id} closed: {close_response.json()}")
-
-    return jsonify({"status": "trailing logic executed"})
-
-if __name__ == "__main__":
-    app.run(debug=True)
+    except Exception as e:
+        print("Error:", e)
+        time.sleep(60)
