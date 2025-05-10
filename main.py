@@ -107,6 +107,7 @@ def place_trade(pair, units, side, sl_pips, tp_pips):
 while True:
     try:
         for pair in PAIRS:
+            print(f"Checking {pair} at {time.strftime('%Y-%m-%d %H:%M:%S')}")
             df = get_indicators(pair)
             signal, side = check_entry_signal(df)
 
